@@ -4,6 +4,7 @@
 
 // This must be included before many other Windows headers.
 #include <windows.h>
+#include <Shlwapi.h>
 
 #include <flutter/event_channel.h>
 #include <flutter/event_stream_handler_functions.h>
@@ -75,6 +76,17 @@ auto TO_WIDESTRING = [](std::string string) -> std::wstring {
   }
   return utf16_string;
 };
+
+std::string unescapeUri(std::string uri) {
+  DWORD target_length = DWORD(uri.size());
+  auto hResult = UrlUnescapeA(
+    uri.data(), uri.data(), &target_length, URL_UNESCAPE_AS_UTF8 | URL_UNESCAPE_INPLACE);
+  if (SUCCEEDED(hResult)) {
+    uri.resize(target_length);
+    return uri;
+  }
+  return std::string();
+}
 
 
 class JustAudioEventSink {
@@ -511,9 +523,12 @@ private:
     const std::string* type = std::get_if<std::string>(ValueOrNull(source, "type"));
     if (type->compare("progressive") == 0 || type->compare("dash") == 0 || type->compare("hls") == 0) {
       const auto* uri = std::get_if<std::string>(ValueOrNull(source, "uri"));
-      return MediaSource::CreateFromUri(
-        Uri(TO_WIDESTRING(*uri))
-      );
+      // According to https://learn.microsoft.com/en-us/uwp/api/windows.foundation.uri?view=winrt-22621,
+      // Windows::Foundation::Uri has issues with percent-escaped characters. Unescape the uri
+      // to work around these.
+      // This should be tested with non-file URIs that need percent-escaping, and when the Windows
+      // code page isn't 65001.
+      return MediaSource::CreateFromUri(Uri(TO_WIDESTRING(unescapeUri(*uri))));
     } else {
       throw std::invalid_argument("Source is unsupported or can not be nested: " + *type);
     }
