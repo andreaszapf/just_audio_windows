@@ -20,8 +20,6 @@ using flutter::EncodableValue;
 
 namespace {
 
-std::vector<std::shared_ptr<AudioPlayer>> players_;
-
 class JustAudioWindowsPlugin : public flutter::Plugin {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarWindows *registrar);
@@ -42,6 +40,8 @@ class JustAudioWindowsPlugin : public flutter::Plugin {
 
   // Disposes camera by camera id.
   void DisposePlayerByPlayerId(std::string id);
+
+  std::vector<std::shared_ptr<AudioPlayer>> players_;
 };
 
 // static
