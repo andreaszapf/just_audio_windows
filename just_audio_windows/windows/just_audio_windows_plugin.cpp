@@ -20,8 +20,7 @@ using flutter::EncodableValue;
 
 namespace {
 
-// static std::unordered_map<std::string, AudioPlayer> players;
-std::vector<std::unique_ptr<AudioPlayer>> players_;
+std::vector<std::shared_ptr<AudioPlayer>> players_;
 
 class JustAudioWindowsPlugin : public flutter::Plugin {
  public:
@@ -78,7 +77,7 @@ void JustAudioWindowsPlugin::HandleMethodCall(
       if (!id) {
         return result->Error("argument_error", "id argument missing");
       }
-      auto player = std::make_unique<AudioPlayer>(*id, messenger);
+      auto player = AudioPlayer::Create(*id, messenger);
       players_.push_back(std::move(player));
       result->Success();
     } else if (method_call.method_name().compare("disposePlayer") == 0) {
