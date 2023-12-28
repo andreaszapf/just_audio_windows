@@ -116,10 +116,10 @@ private:
   std::unique_ptr<flutter::EventSink<>> sink = nullptr;
 };
 
-class AudioPlayer {
+class AudioPlayer : public std::enable_shared_from_this<AudioPlayer> {
 private:
-  /* data */
-public:
+  struct PrivateConstructionTag{};
+
   std::string id;
   Playback::MediaPlayer mediaPlayer{};
   Playback::MediaPlaybackList mediaPlaybackList{};
@@ -128,7 +128,29 @@ public:
   std::unique_ptr<JustAudioEventSink> event_sink_ = nullptr;
   std::unique_ptr<JustAudioEventSink> data_sink_ = nullptr;
 
-  AudioPlayer::AudioPlayer(std::string idx, flutter::BinaryMessenger* messenger) {
+public:
+  static std::shared_ptr<AudioPlayer> Create(
+    std::string idx, flutter::BinaryMessenger* messenger) {
+    auto player = std::make_shared<AudioPlayer>(PrivateConstructionTag{});
+    player->Initialize(idx, messenger, PrivateConstructionTag{});
+    return player;
+  }
+
+  AudioPlayer::AudioPlayer(PrivateConstructionTag) {}
+
+
+  AudioPlayer::~AudioPlayer() {
+    player_channel_->SetMethodCallHandler(nullptr);
+    mediaPlayer.Close();
+  }
+
+  bool HasPlayerId(std::string playerId) {
+    return id == playerId;
+  }
+
+private:
+  void AudioPlayer::Initialize(
+    std::string idx, flutter::BinaryMessenger* messenger, PrivateConstructionTag) {
     id = idx;
 
     // Set up channels
@@ -148,12 +170,17 @@ public:
 
     /// Set up event callbacks
     // Playback event
-    mediaPlayer.PlaybackSession().PlaybackStateChanged([=](auto, const auto& args) -> void {
-      broadcastState();
+    mediaPlayer.PlaybackSession().PlaybackStateChanged(
+      [weakSelf = weak_from_this()](auto, const auto& args) -> void {
+      if (auto self = weakSelf.lock()) {
+        self->broadcastState();
+      }
     });
 
     // Player error event
-    mediaPlayer.MediaFailed([=](auto, const Playback::MediaPlayerFailedEventArgs& args) -> void {
+    mediaPlayer.MediaFailed(
+      [weakSelf = weak_from_this()](
+        auto, const Playback::MediaPlayerFailedEventArgs& args) -> void {
       std::string errorMessage = winrt::to_string(args.ErrorMessage());
 
       std::cerr << "[just_audio_windows] Media error: " << errorMessage << std::endl;
@@ -177,14 +204,21 @@ public:
         break;
       }
 
-      event_sink_->Error(code, errorMessage);
+      if (auto self = weakSelf.lock()) {
+        self->event_sink_->Error(code, errorMessage);
+      }
     });
 
     mediaPlaybackList.MaxPlayedItemsToKeepOpen(2);
-    mediaPlaybackList.CurrentItemChanged([=](auto, const auto& args) -> void {
-      broadcastState();
+    mediaPlaybackList.CurrentItemChanged(
+      [weakSelf = weak_from_this()](auto, const auto& args) -> void {
+      if (auto self = weakSelf.lock()) {
+        self->broadcastState();
+      }
     });
-    mediaPlaybackList.ItemFailed([=](auto, const Playback::MediaPlaybackItemFailedEventArgs& args) -> void {
+    mediaPlaybackList.ItemFailed(
+      [weakSelf = weak_from_this()](
+        auto, const Playback::MediaPlaybackItemFailedEventArgs& args) -> void {
       auto error = winrt::hresult_error(args.Error().ExtendedError());
 
       auto message = winrt::to_string(error.message());
@@ -211,16 +245,10 @@ public:
         break;
       }
 
-      event_sink_->Error(code, message);
+      if (auto self = weakSelf.lock()) {
+        self->event_sink_->Error(code, message);
+      }
     });
-  }
-  AudioPlayer::~AudioPlayer() {
-    player_channel_->SetMethodCallHandler(nullptr);
-    mediaPlayer.Close();
-  }
-
-  bool HasPlayerId(std::string playerId) {
-    return id == playerId;
   }
 
   void AudioPlayer::HandleMethodCall(
