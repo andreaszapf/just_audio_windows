@@ -14,6 +14,7 @@
 #include <sstream>
 
 #include "player.hpp"
+#include "ui_thread_handler.hpp"
 
 using flutter::EncodableMap;
 using flutter::EncodableValue;
@@ -24,7 +25,7 @@ class JustAudioWindowsPlugin : public flutter::Plugin {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarWindows *registrar);
 
-  JustAudioWindowsPlugin();
+  explicit JustAudioWindowsPlugin(flutter::PluginRegistrarWindows* registrar);
 
   virtual ~JustAudioWindowsPlugin();
 
@@ -42,6 +43,7 @@ class JustAudioWindowsPlugin : public flutter::Plugin {
   void DisposePlayerByPlayerId(std::string id);
 
   std::vector<std::shared_ptr<AudioPlayer>> players_;
+  JustAudioUiThreadHandler uiThreadHandler_;
 };
 
 // static
@@ -52,7 +54,7 @@ void JustAudioWindowsPlugin::RegisterWithRegistrar(
           registrar->messenger(), "com.ryanheise.just_audio.methods",
           &flutter::StandardMethodCodec::GetInstance());
 
-  auto plugin = std::make_unique<JustAudioWindowsPlugin>();
+  auto plugin = std::make_unique<JustAudioWindowsPlugin>(registrar);
 
   channel->SetMethodCallHandler(
       [plugin_pointer = plugin.get(), messenger_pointer = registrar->messenger()](const auto &call, auto result) {
@@ -62,7 +64,9 @@ void JustAudioWindowsPlugin::RegisterWithRegistrar(
   registrar->AddPlugin(std::move(plugin));
 }
 
-JustAudioWindowsPlugin::JustAudioWindowsPlugin() {}
+JustAudioWindowsPlugin::JustAudioWindowsPlugin(flutter::PluginRegistrarWindows* registrar)
+  : uiThreadHandler_(registrar) {
+}
 
 JustAudioWindowsPlugin::~JustAudioWindowsPlugin() {}
 
@@ -77,7 +81,7 @@ void JustAudioWindowsPlugin::HandleMethodCall(
       if (!id) {
         return result->Error("argument_error", "id argument missing");
       }
-      auto player = AudioPlayer::Create(*id, messenger);
+      auto player = AudioPlayer::Create(*id, messenger, &uiThreadHandler_);
       players_.push_back(std::move(player));
       result->Success();
     } else if (method_call.method_name().compare("disposePlayer") == 0) {

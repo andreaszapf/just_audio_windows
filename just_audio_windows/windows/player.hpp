@@ -18,6 +18,8 @@
 #include <winrt/Windows.Media.Playback.h>
 #include <winrt/Windows.System.h>
 
+#include "ui_thread_handler.hpp"
+
 #define TO_MILLISECONDS(timespan) timespan.count() / 10000
 #define TO_MICROSECONDS(timespan) TO_MILLISECONDS(timespan) * 1000
 
@@ -89,13 +91,28 @@ std::string unescapeUri(std::string uri) {
 }
 
 
-class JustAudioEventSink {
+class JustAudioEventSink : public std::enable_shared_from_this<JustAudioEventSink> {
+private:
+  struct PrivateConstructionTag {};
+
 public:
   // Prevent copying.
   JustAudioEventSink(JustAudioEventSink const&) = delete;
   JustAudioEventSink& operator=(JustAudioEventSink const&) = delete;
 
-  JustAudioEventSink::JustAudioEventSink(flutter::BinaryMessenger* messenger, const std::string& id) {
+  static std::shared_ptr<JustAudioEventSink> Create(
+    flutter::BinaryMessenger* messenger, const std::string& id, JustAudioUiThreadHandler* uiThreadHandler) {
+    auto eventSink = std::make_shared<JustAudioEventSink>(PrivateConstructionTag{});
+    eventSink->Initialize(messenger, id, uiThreadHandler, PrivateConstructionTag{});
+    return eventSink;
+  }
+
+  JustAudioEventSink(PrivateConstructionTag) {}
+
+  void Initialize(
+    flutter::BinaryMessenger* messenger, const std::string& id, JustAudioUiThreadHandler* uiHandler, PrivateConstructionTag) {
+    uiThreadHandler = uiHandler;
+
     auto event_channel =
       std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(messenger, id, &flutter::StandardMethodCodec::GetInstance());
 
@@ -111,20 +128,29 @@ public:
     event_channel->SetStreamHandler(std::move(event_handler));
   }
 
-  void Success(const EncodableValue& event) {
-    if (sink) {
-      sink->Success(event);
-    }
+  void PostSuccess(const EncodableValue& event) {
+    uiThreadHandler->Post([event, weakSelf = weak_from_this()] {
+      if (auto self = weakSelf.lock()) {
+        if (self->sink) {
+          self->sink->Success(event);
+        }
+      }
+    });
   }
 
-  void Error(const std::string& error_code,
-    const std::string& error_message) {
-    if (sink) {
-      sink->Error(error_code, error_message);
-    }
+  void PostError(const std::string& error_code, const std::string& error_message) {
+    uiThreadHandler->Post([error_code, error_message, weakSelf = weak_from_this()] {
+      if (auto self = weakSelf.lock()) {
+        if (self->sink) {
+          self->sink->Error(error_code, error_message);
+        }
+      }
+    });
   }
+
 private:
   std::unique_ptr<flutter::EventSink<>> sink = nullptr;
+  JustAudioUiThreadHandler* uiThreadHandler = nullptr;
 };
 
 class AudioPlayer : public std::enable_shared_from_this<AudioPlayer> {
@@ -136,14 +162,14 @@ private:
   Playback::MediaPlaybackList mediaPlaybackList{};
 
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> player_channel_;
-  std::unique_ptr<JustAudioEventSink> event_sink_ = nullptr;
-  std::unique_ptr<JustAudioEventSink> data_sink_ = nullptr;
+  std::shared_ptr<JustAudioEventSink> event_sink_;
+  std::shared_ptr<JustAudioEventSink> data_sink_;
 
 public:
   static std::shared_ptr<AudioPlayer> Create(
-    std::string idx, flutter::BinaryMessenger* messenger) {
+    std::string idx, flutter::BinaryMessenger* messenger, JustAudioUiThreadHandler* uiThreadHandler) {
     auto player = std::make_shared<AudioPlayer>(PrivateConstructionTag{});
-    player->Initialize(idx, messenger, PrivateConstructionTag{});
+    player->Initialize(idx, messenger, uiThreadHandler, PrivateConstructionTag{});
     return player;
   }
 
@@ -161,7 +187,7 @@ public:
 
 private:
   void AudioPlayer::Initialize(
-    std::string idx, flutter::BinaryMessenger* messenger, PrivateConstructionTag) {
+    std::string idx, flutter::BinaryMessenger* messenger, JustAudioUiThreadHandler* uiThreadHandler, PrivateConstructionTag) {
     id = idx;
 
     // Set up channels
@@ -176,8 +202,10 @@ private:
       player->HandleMethodCall(call, std::move(result));
     });
 
-    event_sink_ = std::make_unique<JustAudioEventSink>(messenger, "com.ryanheise.just_audio.events." + idx);
-    data_sink_ = std::make_unique<JustAudioEventSink>(messenger, "com.ryanheise.just_audio.data." + idx);
+    event_sink_ = JustAudioEventSink::Create(
+      messenger, "com.ryanheise.just_audio.events." + idx, uiThreadHandler);
+    data_sink_ = JustAudioEventSink::Create(
+      messenger, "com.ryanheise.just_audio.data." + idx, uiThreadHandler);
 
     /// Set up event callbacks
     // Playback event
@@ -216,7 +244,7 @@ private:
       }
 
       if (auto self = weakSelf.lock()) {
-        self->event_sink_->Error(code, errorMessage);
+        self->event_sink_->PostError(code, errorMessage);
       }
     });
 
@@ -257,7 +285,7 @@ private:
       }
 
       if (auto self = weakSelf.lock()) {
-        self->event_sink_->Error(code, message);
+        self->event_sink_->PostError(code, message);
       }
     });
   }
@@ -572,7 +600,7 @@ private:
       eventData[flutter::EncodableValue("currentIndex")] = flutter::EncodableValue(0); //int
     }
 
-    event_sink_->Success(eventData);
+    event_sink_->PostSuccess(eventData);
   }
 
   int AudioPlayer::processingState(Playback::MediaPlaybackState state) {
@@ -602,7 +630,7 @@ private:
     eventData[flutter::EncodableValue("loopMode")] = flutter::EncodableValue(getLoopMode());
     eventData[flutter::EncodableValue("shuffleMode")] = flutter::EncodableValue(getShuffleMode());
 
-    data_sink_->Success(eventData);
+    data_sink_->PostSuccess(eventData);
   }
 
   int AudioPlayer::getLoopMode() {
