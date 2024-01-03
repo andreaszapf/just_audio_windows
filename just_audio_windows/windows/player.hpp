@@ -258,7 +258,7 @@ private:
 
     if (method_call.method_name().compare("load") == 0) {
       const auto* audioSourceData = std::get_if<flutter::EncodableMap>(ValueOrNull(*args, "audioSource"));
-      const auto* initialPosition = std::get_if<int>(ValueOrNull(*args, "initialPosition"));
+      const auto initialPosition = ValueOrNull(*args, "initialPosition");
       const auto* initialIndex = std::get_if<int>(ValueOrNull(*args, "initialIndex"));
 
       try {
@@ -272,7 +272,7 @@ private:
       }
 
       if (initialPosition != nullptr) {
-        seekToPosition(*initialPosition);
+        seekToPosition((*initialPosition).LongValue());
       }
 
       result->Success(flutter::EncodableMap());
