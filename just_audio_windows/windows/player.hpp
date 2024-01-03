@@ -169,13 +169,15 @@ private:
     data_sink_ = std::make_unique<JustAudioEventSink>(messenger, "com.ryanheise.just_audio.data." + idx);
 
     /// Set up event callbacks
-    // Playback event
-    mediaPlayer.PlaybackSession().PlaybackStateChanged(
-      [weakSelf = weak_from_this()](auto, const auto& args) -> void {
+    // Playback events
+    auto handlePlaybackEvent = [weakSelf = weak_from_this()](auto, const auto& args) -> void {
       if (auto self = weakSelf.lock()) {
         self->broadcastState();
       }
-    });
+    };
+
+    mediaPlayer.PlaybackSession().PlaybackStateChanged(handlePlaybackEvent);
+    mediaPlayer.PlaybackSession().NaturalDurationChanged(handlePlaybackEvent);
 
     // Player error event
     mediaPlayer.MediaFailed(
@@ -210,12 +212,7 @@ private:
     });
 
     mediaPlaybackList.MaxPlayedItemsToKeepOpen(2);
-    mediaPlaybackList.CurrentItemChanged(
-      [weakSelf = weak_from_this()](auto, const auto& args) -> void {
-      if (auto self = weakSelf.lock()) {
-        self->broadcastState();
-      }
-    });
+    mediaPlaybackList.CurrentItemChanged(handlePlaybackEvent);
     mediaPlaybackList.ItemFailed(
       [weakSelf = weak_from_this()](
         auto, const Playback::MediaPlaybackItemFailedEventArgs& args) -> void {
