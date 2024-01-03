@@ -1,6 +1,7 @@
 #pragma comment(lib, "windowsapp")
 
 #include <chrono>
+#include <optional>
 
 // This must be included before many other Windows headers.
 #include <windows.h>
@@ -52,6 +53,20 @@ const EncodableValue* ValueOrNull(const EncodableMap& map, const char* key) {
     return nullptr;
   }
   return &(it->second);
+}
+
+// If |value| is non-null and holds an integral number, returns that number as
+// std::microseconds. Otherwise returns std::nullopt.
+std::optional<std::chrono::microseconds> getMicroseconds(
+  const flutter::EncodableValue* value)
+{
+  if (const auto* int32Value = std::get_if<int32_t>(value)) {
+    return std::chrono::microseconds(*int32Value);
+  } else if (const auto* int64Value = std::get_if<int64_t>(value)) {
+    return std::chrono::microseconds(*int64Value);
+  }
+
+  return std::nullopt;
 }
 
 // Converts a std::string to std::wstring
@@ -269,7 +284,7 @@ private:
 
     if (method_call.method_name().compare("load") == 0) {
       const auto* audioSourceData = std::get_if<flutter::EncodableMap>(ValueOrNull(*args, "audioSource"));
-      const auto* initialPosition = std::get_if<int>(ValueOrNull(*args, "initialPosition"));
+      const auto initialPosition = getMicroseconds(ValueOrNull(*args, "initialPosition"));
       const auto* initialIndex = std::get_if<int>(ValueOrNull(*args, "initialIndex"));
 
       try {
@@ -282,7 +297,7 @@ private:
         seekToItem((uint32_t)*initialIndex);
       }
 
-      if (initialPosition != nullptr) {
+      if (initialPosition) {
         seekToPosition(*initialPosition);
       }
 
@@ -373,8 +388,8 @@ private:
         seekToItem((uint32_t)*index);
       }
 
-      const auto* position = std::get_if<int>(ValueOrNull(*args, "position"));
-      if (position != nullptr) {
+      const auto position = getMicroseconds(ValueOrNull(*args, "position"));
+      if (position) {
         seekToPosition(*position);
       }
       result->Success(flutter::EncodableMap());
@@ -649,8 +664,8 @@ private:
     broadcastState();
   }
 
-  void AudioPlayer::seekToPosition(int microseconds) {
-    mediaPlayer.Position(TimeSpan(std::chrono::microseconds(microseconds)));
+  void AudioPlayer::seekToPosition(std::chrono::microseconds microseconds) {
+    mediaPlayer.Position(microseconds);
 
     broadcastState();
   }
