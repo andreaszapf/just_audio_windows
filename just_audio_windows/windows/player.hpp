@@ -212,6 +212,8 @@ private:
 
     mediaPlayer.MediaOpened([weakSelf = weak_from_this()](auto, const auto& args) -> void {
       if (auto self = weakSelf.lock()) {
+        // Turn off system media controls, so that apps can use the smtc_windows plugin.
+        self->mediaPlayer.CommandManager().IsEnabled(false);
         auto duration = TO_MICROSECONDS(
           self->mediaPlayer.PlaybackSession().NaturalDuration());
         self->broadcastState();
