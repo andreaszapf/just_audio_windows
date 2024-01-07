@@ -263,18 +263,18 @@ private:
 
       try {
         loadSource(*audioSourceData);
-      } catch (char* error) {
-        return result->Error("load_error", error);
-      }
+        if (initialIndex != nullptr) {
+          seekToItem((uint32_t)*initialIndex);
+        }
 
-      if (initialIndex != nullptr) {
-        seekToItem((uint32_t)*initialIndex);
+        if (initialPosition != nullptr) {
+          seekToPosition((*initialPosition).LongValue());
+        }
+      } catch (winrt::hresult_error const& ex) {
+        broadcastState();
+        return result->Error("load_error", winrt::to_string(ex.message()));
       }
-
-      if (initialPosition != nullptr) {
-        seekToPosition((*initialPosition).LongValue());
-      }
-
+      broadcastState();
       result->Success(flutter::EncodableMap());
     } else if (method_call.method_name().compare("play") == 0) {
       mediaPlayer.Play();
@@ -358,16 +358,21 @@ private:
       result->Success(flutter::EncodableMap());
     } else if (method_call.method_name().compare("seek") == 0) {
       const auto* index = std::get_if<int>(ValueOrNull(*args, "index"));
-      if (index != nullptr) {
-        seekToItem((uint32_t)*index);
-      }
-
       const auto* position = ValueOrNull(*args, "position");
 
-      if (position != nullptr) {
-        seekToPosition((*position).LongValue());
+      try {
+        if (index != nullptr) {
+          seekToItem((uint32_t)*index);
+        }
+
+        if (position != nullptr) {
+          seekToPosition((*position).LongValue());
+        }
+      } catch (winrt::hresult_error const& ex) {
+        broadcastState();
+        return result->Error("seek_error", winrt::to_string(ex.message()));
       }
-      
+      broadcastState();
       result->Success(flutter::EncodableMap());
     } else if (method_call.method_name().compare("concatenatingInsertAll") == 0) {
       const auto* index = std::get_if<int>(ValueOrNull(*args, "index"));
@@ -512,9 +517,9 @@ private:
       if (type->compare("progressive") == 0 || type->compare("dash") == 0 || type->compare("hls") == 0) {
           const auto* uri = std::get_if<std::string>(ValueOrNull(source, "uri"));
           std::string decodedUri;
-          UrlDecode(*uri, decodedUri); 
+          UrlDecode(*uri, decodedUri);
           return MediaSource::CreateFromUri(
-              Uri(TO_WIDESTRING(decodedUri)) 
+              Uri(TO_WIDESTRING(decodedUri))
           );
       }
       else {
@@ -645,19 +650,15 @@ private:
       return;
     }
 
-    try {
-      mediaPlaybackList.MoveTo(index);
-    } catch (winrt::hresult_error const& ex) {
-      std::cerr << "[just_audio_windows] Failed to seek to item: " << winrt::to_string(ex.message()) << std::endl;
+    if (index == mediaPlaybackList.CurrentItemIndex()) {
+      return;
     }
 
-    broadcastState();
+    mediaPlaybackList.MoveTo(index);
   }
 
   void AudioPlayer::seekToPosition(int64_t microseconds) {
     mediaPlayer.Position(TimeSpan(std::chrono::microseconds(microseconds)));
-
-    broadcastState();
   }
 
   void AudioPlayer::setShuffleOrder(const flutter::EncodableMap& source) {
