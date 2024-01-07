@@ -289,18 +289,18 @@ private:
 
       try {
         loadSource(*audioSourceData);
-      } catch (char* error) {
-        return result->Error("load_error", error);
-      }
+        if (initialIndex != nullptr) {
+          seekToItem((uint32_t)*initialIndex);
+        }
 
-      if (initialIndex != nullptr) {
-        seekToItem((uint32_t)*initialIndex);
+        if (initialPosition) {
+          seekToPosition(*initialPosition);
+        }
+      } catch (winrt::hresult_error const& ex) {
+        broadcastState();
+        return result->Error("load_error", winrt::to_string(ex.message()));
       }
-
-      if (initialPosition) {
-        seekToPosition(*initialPosition);
-      }
-
+      broadcastState();
       result->Success(flutter::EncodableMap());
     } else if (method_call.method_name().compare("play") == 0) {
       mediaPlayer.Play();
@@ -384,14 +384,22 @@ private:
       result->Success(flutter::EncodableMap());
     } else if (method_call.method_name().compare("seek") == 0) {
       const auto* index = std::get_if<int>(ValueOrNull(*args, "index"));
-      if (index != nullptr) {
-        seekToItem((uint32_t)*index);
+      const auto position = getMicroseconds(ValueOrNull(*args, "position"));
+
+      try {
+        if (index != nullptr) {
+          seekToItem((uint32_t)*index);
+        }
+
+        if (position) {
+          seekToPosition(*position);
+        }
+      } catch (winrt::hresult_error const& ex) {
+        broadcastState();
+        return result->Error("seek_error", winrt::to_string(ex.message()));
       }
 
-      const auto position = getMicroseconds(ValueOrNull(*args, "position"));
-      if (position) {
-        seekToPosition(*position);
-      }
+      broadcastState();
       result->Success(flutter::EncodableMap());
     } else if (method_call.method_name().compare("concatenatingInsertAll") == 0) {
       const auto* index = std::get_if<int>(ValueOrNull(*args, "index"));
@@ -655,19 +663,15 @@ private:
       return;
     }
 
-    try {
-      mediaPlaybackList.MoveTo(index);
-    } catch (winrt::hresult_error const& ex) {
-      std::cerr << "[just_audio_windows] Failed to seek to item: " << winrt::to_string(ex.message()) << std::endl;
+    if (index == mediaPlaybackList.CurrentItemIndex()) {
+      return;
     }
 
-    broadcastState();
+    mediaPlaybackList.MoveTo(index);
   }
 
   void AudioPlayer::seekToPosition(std::chrono::microseconds microseconds) {
     mediaPlayer.Position(microseconds);
-
-    broadcastState();
   }
 
   void AudioPlayer::setShuffleOrder(const flutter::EncodableMap& source) {
