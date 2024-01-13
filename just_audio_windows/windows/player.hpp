@@ -1,6 +1,8 @@
 #pragma comment(lib, "windowsapp")
 
 #include <chrono>
+#include <mutex>
+#include <optional>
 
 // This must be included before many other Windows headers.
 #include <windows.h>
@@ -128,6 +130,9 @@ private:
   std::unique_ptr<JustAudioEventSink> event_sink_ = nullptr;
   std::unique_ptr<JustAudioEventSink> data_sink_ = nullptr;
 
+  std::mutex results_mutex_; // Lock this mutex when you want to use the result member below
+  std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> load_result_;
+
 public:
   static std::shared_ptr<AudioPlayer> Create(
     std::string idx, flutter::BinaryMessenger* messenger) {
@@ -140,6 +145,7 @@ public:
 
 
   AudioPlayer::~AudioPlayer() {
+    completeLoad();
     player_channel_->SetMethodCallHandler(nullptr);
     mediaPlayer.Close();
   }
@@ -179,6 +185,15 @@ private:
     mediaPlayer.PlaybackSession().PlaybackStateChanged(handlePlaybackEvent);
     mediaPlayer.PlaybackSession().NaturalDurationChanged(handlePlaybackEvent);
 
+    mediaPlayer.MediaOpened([weakSelf = weak_from_this()](auto, const auto& args) -> void {
+      if (auto self = weakSelf.lock()) {
+        auto duration = TO_MICROSECONDS(
+          self->mediaPlayer.PlaybackSession().NaturalDuration());
+        self->broadcastState();
+        self->completeLoad(duration);
+      }
+    });
+
     // Player error event
     mediaPlayer.MediaFailed(
       [weakSelf = weak_from_this()](
@@ -207,6 +222,7 @@ private:
       }
 
       if (auto self = weakSelf.lock()) {
+        self->completeLoad();
         self->event_sink_->Error(code, errorMessage);
       }
     });
@@ -261,6 +277,8 @@ private:
       const auto initialPosition = ValueOrNull(*args, "initialPosition");
       const auto* initialIndex = std::get_if<int>(ValueOrNull(*args, "initialIndex"));
 
+      completeLoad();
+
       try {
         loadSource(*audioSourceData, initialIndex);
         if (initialPosition != nullptr) {
@@ -270,8 +288,11 @@ private:
         broadcastState();
         return result->Error("load_error", winrt::to_string(ex.message()));
       }
+      {
+        std::lock_guard<std::mutex> lock(results_mutex_);
+        load_result_ = std::move(result);
+      }
       broadcastState();
-      result->Success(flutter::EncodableMap());
     } else if (method_call.method_name().compare("play") == 0) {
       mediaPlayer.Play();
       result->Success(flutter::EncodableMap());
@@ -444,6 +465,18 @@ private:
     } else {
       result->NotImplemented();
     }
+  }
+
+  void AudioPlayer::completeLoad(int64_t durationInMicroseconds = 0) {
+    std::lock_guard<std::mutex> lock(results_mutex_);
+    if (load_result_ == nullptr) return;
+
+    auto response = EncodableMap();
+    if (durationInMicroseconds > 0) {
+      response[EncodableValue("duration")] = EncodableValue(durationInMicroseconds);
+    }
+    load_result_->Success(response);
+    load_result_ = nullptr;
   }
 
   void AudioPlayer::loadSource(const flutter::EncodableMap& source, const int* initialIndex) const& {
