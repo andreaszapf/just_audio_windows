@@ -288,11 +288,7 @@ private:
       const auto* initialIndex = std::get_if<int>(ValueOrNull(*args, "initialIndex"));
 
       try {
-        loadSource(*audioSourceData);
-        if (initialIndex != nullptr) {
-          seekToItem((uint32_t)*initialIndex);
-        }
-
+        loadSource(*audioSourceData, initialIndex);
         if (initialPosition) {
           seekToPosition(*initialPosition);
         }
@@ -477,7 +473,7 @@ private:
     }
   }
 
-  void AudioPlayer::loadSource(const flutter::EncodableMap& source) const& {
+  void AudioPlayer::loadSource(const flutter::EncodableMap& source, const int* initialIndex) const& {
     auto items = mediaPlaybackList.Items();
     items.Clear(); // Always clear the list since we are resetting
 
@@ -490,6 +486,11 @@ private:
         const auto* childMap = std::get_if<flutter::EncodableMap>(&child);
         auto item = createMediaPlaybackItem(*childMap);
         items.Append(item);
+      }
+
+      if (initialIndex != nullptr) {
+        auto item = items.GetAt((uint32_t)*initialIndex);
+        mediaPlaybackList.StartingItem(item);
       }
 
       mediaPlayer.Source(mediaPlaybackList.as<Playback::IMediaPlaybackSource>());
